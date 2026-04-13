@@ -3,7 +3,7 @@ UltGrantTargeting = {}
 local UGT = UltGrantTargeting
 
 UGT.name = "UltGrantTargeting"
-UGT.version = "1.0.0"
+UGT.version = "1.1.0"
 UGT.prefix = "|c33CCFF[UGT]|r "
 
 UGT.savedVars = nil
@@ -33,6 +33,11 @@ UGT.COLOVIAN_IDS = {
     [202843] = "Colovian Highlands General",
 }
 
+-- Cryptcannon Vestments (Crypt Transfer) ability IDs
+UGT.CRYPTCANNON_IDS = {
+    [195031] = "Crypt Transfer",
+}
+
 -- Combined lookup of all tracked set proc IDs (rebuilt on load)
 UGT.TRACKED_SET_IDS = {}
 
@@ -52,6 +57,9 @@ UGT.MAX_RECENT = 50
 -- one snapshot rather than N.
 UGT.lastSnapshotTime = 0
 UGT.SNAPSHOT_DEBOUNCE = 0.15 -- seconds
+
+-- LibGroupCombatStats integration (optional, populated on load)
+UGT.lgcs = nil
 
 -- ---------------------------------------------------------------------------
 -- Readable name tables
@@ -148,6 +156,14 @@ function UGT.GetGroupSnapshot()
             local px, py = GetMapPlayerPosition(tag)
             local isMe = AreUnitsEqual(tag, "player")
 
+            -- Use LGCS ult value for non-self members (API returns 0 for them)
+            if not isMe and UGT.lgcs then
+                local ultData = UGT.lgcs:GetUnitULT(tag)
+                if ultData and ultData.ultValue then
+                    current = ultData.ultValue
+                end
+            end
+
             -- Compute normalized map distance from the player
             local dx = px - myX
             local dy = py - myY
@@ -157,8 +173,6 @@ function UGT.GetGroupSnapshot()
             local hasMagma = UGT.magmaArmorActive[tag] and true or false
             local magmaId = hasMagma and UGT.magmaArmorActive[tag].abilityId or 0
 
-            -- If we can't see their ult (non-self group member), current will be 0
-            -- unless using LibGroupBroadcast/LibGroupCombatStats
             table.insert(snapshot, {
                 tag         = tag,
                 name        = GetUnitName(tag) or "?",
@@ -477,6 +491,7 @@ function UGT.SlashCommand(args)
 
         -- Discovery mode
         UGT.Log("  Discovery mode: " .. (UGT.discoveryMode and "|cFF00FFON|r" or "|c888888OFF|r"))
+        UGT.Log("  LGCS: " .. (UGT.lgcs and "|c00FF00connected|r" or "|cFF4400not loaded|r"))
 
     elseif cmd == "snapshot" then
         local snapshot = UGT.GetGroupSnapshot()
@@ -615,6 +630,9 @@ function UGT.RebuildTrackedSetIDs()
     for id, name in pairs(UGT.COLOVIAN_IDS) do
         UGT.TRACKED_SET_IDS[id] = name
     end
+    for id, name in pairs(UGT.CRYPTCANNON_IDS) do
+        UGT.TRACKED_SET_IDS[id] = name
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -632,6 +650,15 @@ function UGT.OnAddonLoaded(_, addonName)
     end
     UGT.StartSession()
     UGT.RebuildTrackedSetIDs()
+
+    -- -------------------------------------------------------------------
+    -- LibGroupCombatStats integration (optional)
+    -- Provides actual ult values for group members in snapshots
+    -- -------------------------------------------------------------------
+    if LibGroupCombatStats and LibGroupCombatStats.RegisterAddon then
+        UGT.lgcs = LibGroupCombatStats.RegisterAddon(UGT.name, {"ULT"})
+        UGT.Log("  LibGroupCombatStats detected — group ult values available.")
+    end
 
     -- -------------------------------------------------------------------
     -- Core event: combat events for POWER_ENERGIZE
@@ -675,7 +702,10 @@ function UGT.OnAddonLoaded(_, addonName)
     else
         UGT.Log("  |cFFFF00No set proc IDs configured yet.|r Use |c33CCFF/ugt discover|r to find them.")
     end
-    UGT.Log("  Tracking Magma Armor IDs: 15957, 17874, 17878, 32944")
+    UGT.Log("  Tracking Magma Armor IDs: 15957, 17874, 17878")
+    if not UGT.lgcs then
+        UGT.Log("  |cFFFF00LibGroupCombatStats not found|r — group ult values will show 0 in snapshots.")
+    end
     UGT.Log("  Use |c33CCFF/ugt help|r for commands")
 end
 

@@ -6,8 +6,11 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 ## Sets Under Test
 
-| Set | Effect | Targets | Stated Range | ICD |
-|-----|--------|---------|-------------|-----|
+| Set | Type | Effect | Targets | Stated Range | ICD |
+|-----|------|--------|---------|-------------|-----|
+| **Arkasis' Genius** | Dungeon (5pc) | Drink potion in combat → you + 3 group members gain 42 ult | 3 (+ self) | Unknown | 30s |
+| **Colovian Highlands General** | Monster (1pc) | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
+| **Cryptcannon Vestments** | Mythic | Replaces ult with Crypt Transfer: consume all ult, distribute to nearby group members | Group (nearby) | Unknown | N/A |
 | **Arkasis' Genius** | Drink potion in combat → you + 3 group members gain 42 ult | 3 (+ self) | Unknown | 30s |
 | **Colovian Highlands General** | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
 
@@ -21,12 +24,10 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 ## Prerequisites
 
-- **PTS** environment with 2–4 accounts (yourself + alt + guildy + guildy alt)
-- One character equipped with **Arkasis' Genius** (5-piece) and **tri-stat potions** with 3x Infused jewelry (potion cooldown reduction → 30s cycle)
-- One character equipped with **Colovian Highlands General** (1-piece monster set + conditions for kills in Cyrodiil)
-- At least one **Dragonknight** with Magma Armor or morph slotted
+- **PTS** environment
+- Characters equipped with each set under test
 - A target dummy or PvE mobs to maintain combat state
-- UltGrantTargeting addon loaded on all test characters (or at minimum, the set-wearer)
+- UltGrantTargeting addon loaded on the tester running the set; other participants don't strictly need it (the addon uses LibGroupCombatStats via LibGroupBroadcast to read group members' ult values remotely)
 
 ## Phase 0: Discovery — COMPLETE
 
@@ -36,6 +37,7 @@ Proc ability IDs have been discovered and configured:
 |-------------|-----------|--------|
 | Arkasis's Genius proc | 142660 | Configured |
 | Colovian Highlands General proc | 202843 | Configured |
+| Cryptcannon Vestments (Crypt Transfer) | 195031 | Configured |
 | Magma Armor | 15957 | Confirmed (buff = cast ID) |
 | Magma Shell | 17874 | Confirmed (buff = cast ID) |
 | Corrosive Armor | 17878 | Confirmed (buff = cast ID) |
@@ -114,16 +116,34 @@ Proc ability IDs have been discovered and configured:
 
 ---
 
-## Phase E: Edge Cases
+## Phase E: Cryptcannon Vestments — Targeting & Interactions
 
-**Players needed: 2 minimum (E1, E2, E4), 1 for E3**
+**Cryptcannon Vestments** replaces your ultimate with **Crypt Transfer** (ability ID 195031): activating it consumes all your ultimate and distributes it to nearby group members. Unlike Arkasis/Colovian, the ult transfer amount is variable (depends on how much ult you had). The key questions: how are targets selected, what's the range, and what happens when a target can't gain ult?
+
+**Players needed: 4 for most tests. 5+ for F3. Need PvE combat (dummy).**
 
 | # | Test | Players | Setup | Steps | Expected | Actual |
 |---|------|---------|-------|-------|----------|--------|
-| E1 | Dead group member | 2 | One member dead within range. Arkasis potion. | Does dead member receive ult? | Probably not | |
-| E2 | Offline/zoned member | 2 | One member in a different zone. Arkasis potion. | Skipped (out of range)? | Skipped | |
-| E3 | Solo (no group) | 1 | Arkasis wearer not in a group. Drink potion in combat. | Self gains +42? No group targets? | Self receives, no errors | |
-| E4 | Alliance War ult lock | 2 (+1 enemy) | If player recently died in Cyrodiil and has ult reset to 0 with lock. | Does the lock prevent Arkasis ult gain? | Possibly blocked | |
+| E1 | Baseline — distribution pattern | 4 | All within 5m. Caster at 500 ult. | Activate Crypt Transfer. How much ult does each member receive? Is it split evenly (500/3 ≈ 166 each)? | Even split among eligible members | |
+| E2 | Partial ult | 4 | All within 5m. Caster at 200 ult. | Activate Crypt Transfer. How much does each receive? (200/3 ≈ 66?) | Proportional to consumed ult | |
+| E3 | Target cap | 5+ | All within 5m. Caster at 500 ult. 4+ candidates. | Activate Crypt Transfer. Does everyone receive, or is there a target cap? | Determines if there's a max target count | |
+| E4 | Range test | 4 | B: 5m, C: 30m, D: 60m. Caster at 500 ult. | Activate Crypt Transfer. Who receives? | Find range cutoff | |
+| E5 | Magma Armor — targeted or skipped? | 4 | All within 5m. One member under Magma Armor. Caster at 500 ult. | Activate Crypt Transfer. Count recipients. Does blocked member receive (wasted) or get skipped? | ??? | |
+| E6 | Magma Armor — redistribution | 4 | All within 5m. One member under Magma Armor. Caster at 500 ult. | If blocked member is skipped, is their share redistributed (250 each to 2) or lost (166 each to 2)? | Determines if total ult is conserved | |
+| E7 | Self under Magma Armor | 4 | Caster is under own Magma Armor. At 500 ult. Note: can you even cast Crypt Transfer during Magma Armor? | Attempt to activate. | May be blocked entirely since Magma Armor replaces ult bar? | |
+
+---
+
+## Phase F: Edge Cases
+
+**Players needed: 2 minimum (F1, F2, F4), 1 for F3**
+
+| # | Test | Players | Setup | Steps | Expected | Actual |
+|---|------|---------|-------|-------|----------|--------|
+| F1 | Dead group member | 2 | One member dead within range. Arkasis potion. | Does dead member receive ult? | Probably not | |
+| F2 | Offline/zoned member | 2 | One member in a different zone. Arkasis potion. | Skipped (out of range)? | Skipped | |
+| F3 | Solo (no group) | 1 | Arkasis wearer not in a group. Drink potion in combat. | Self gains +42? No group targets? | Self receives, no errors | |
+| F4 | Alliance War ult lock | 2 (+1 enemy) | Player recently died in Cyrodiil, ult reset to 0 with lock. | Does the lock prevent Arkasis ult gain? | Possibly blocked | |
 
 ---
 
@@ -143,7 +163,5 @@ After each test phase:
 
 ## Notes
 
-- Potion cooldown with 3× Infused jewelry = 30s, matching Arkasis ICD. One test per 30s.
-- PTS allows easy testing of PvP sets since all participants can port to Cyrodiil.
-- `GetMapPlayerPosition` returns normalized (0–1) coordinates. Distance values are relative within a zone; absolute meter calibration requires a known reference (e.g., Rapid Maneuver 28m radius, or counting tiles on a keep floor).
-- The addon only sees ult values for the player character. Group members' ult values in snapshots will show 0 unless the group member also has this addon or LibGroupCombatStats broadcasting. **Recommendation**: Have all test participants run the addon and compare their own logs.
+- `GetMapPlayerPosition` returns normalized (0–1) coordinates. Distance values are relative within a zone; absolute meter calibration requires a known reference (e.g., Rapid Maneuver 28m radius).
+- The addon integrates with LibGroupCombatStats (via LibGroupBroadcast) to read group members' actual ult values in snapshots. Without LGCS, group member ult values show as 0 in snapshots.
