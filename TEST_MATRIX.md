@@ -11,8 +11,6 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 | **Arkasis' Genius** | Dungeon (5pc) | Drink potion in combat → you + 3 group members gain 42 ult | 3 (+ self) | Unknown | 30s |
 | **Colovian Highlands General** | Monster (1pc) | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
 | **Cryptcannon Vestments** | Mythic | Replaces ult with Crypt Transfer: consume all ult, distribute to nearby group members | Group (nearby) | Unknown | N/A |
-| **Arkasis' Genius** | Drink potion in combat → you + 3 group members gain 42 ult | 3 (+ self) | Unknown | 30s |
-| **Colovian Highlands General** | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
 
 ## Blocking Ability
 
