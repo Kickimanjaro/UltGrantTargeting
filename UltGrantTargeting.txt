@@ -1,0 +1,8 @@
+## APIVersion: 101048 101049
+## Title: UltGrantTargeting
+## Version: 1.0.0
+## Author: Kickimanjaro
+## Description: Diagnostic addon to test ultimate-granting set targeting (Arkasis' Genius, Colovian Highlands General) and interactions with abilities that prevent ultimate gain (Magma Armor morphs). Logs all ultimate POWER_ENERGIZE events with full group state snapshots for offline analysis.
+## SavedVariables: UltGrantTargetingLog
+
+UltGrantTargeting.lua
