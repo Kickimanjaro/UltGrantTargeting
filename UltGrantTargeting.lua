@@ -72,6 +72,11 @@ UGT.SNAPSHOT_DEBOUNCE = 0.15 -- seconds
 -- Pending summary: index of the proc entry awaiting summary after debounce
 UGT.pendingSummaryProcIdx = nil
 
+-- Pending Crypt Transfer activation: tracks activations that may produce
+-- zero energize events (e.g., all targets blocked). If no energize arrives
+-- within the debounce window, we emit a "0 targets" summary.
+UGT.pendingCryptTransfer = nil  -- { time, source, snapshot }
+
 -- LibGroupCombatStats integration (optional, populated on load)
 UGT.lgcs = nil
 
@@ -318,6 +323,12 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
     local isTrackedSet = UGT.TRACKED_SET_IDS[abilityId] or false
     local setName = isTrackedSet or nil
 
+    -- If a pending Crypt Transfer activation exists, mark it as handled
+    -- (energize events arrived, so the normal summary pipeline covers it)
+    if isTrackedSet and UGT.pendingCryptTransfer then
+        UGT.pendingCryptTransfer = nil
+    end
+
     -- Strip gender/number decorators (^Fx, ^Mx, etc.) from combat event names
     sourceName = sourceName and zo_strformat("<<1>>", sourceName) or "?"
     targetName = targetName and zo_strformat("<<1>>", targetName) or "?"
@@ -428,10 +439,13 @@ function UGT.EmitProcSummary()
 
     -- Build target list: first target from trigger, rest from additionalTargets
     local targets = {}
+    local targetNames = {} -- lookup set for cross-referencing snapshot
     table.insert(targets, { name = trigger.target, ult = trigger.hitValue or 0 })
+    targetNames[trigger.target] = true
     if proc.additionalTargets then
         for _, t in ipairs(proc.additionalTargets) do
             table.insert(targets, { name = t.target, ult = t.hitValue or 0 })
+            targetNames[t.target] = true
         end
     end
 
@@ -443,6 +457,25 @@ function UGT.EmitProcSummary()
         table.insert(nameList, string.format("%s (+%d)", t.name, t.ult))
     end
 
+    -- Cross-reference snapshot: find group members who were ult-blocked or dead
+    -- and NOT in the target list (i.e., they were skipped or their ult was wasted)
+    local blockedList = {}
+    local deadList = {}
+    if proc.snapshot then
+        for _, m in ipairs(proc.snapshot) do
+            if not m.isPlayer or m.name ~= source then -- skip the caster
+                if not targetNames[m.name] then
+                    if m.ultBlocked then
+                        table.insert(blockedList, string.format("%s [%s]",
+                            m.name, m.ultBlockName or "?"))
+                    elseif m.isDead then
+                        table.insert(deadList, m.name)
+                    end
+                end
+            end
+        end
+    end
+
     local summary
     if setName == "Crypt Transfer" then
         summary = string.format("|cFFFF00%s|r activated |c00FFFF%s|r, distributing |cFFFFFF%d|r ult to %d targets: %s",
@@ -452,6 +485,15 @@ function UGT.EmitProcSummary()
             source, setName, #targets, table.concat(nameList, ", "))
     end
 
+    if #blockedList > 0 then
+        summary = summary .. string.format(" |cFF4400(%d blocked: %s)|r",
+            #blockedList, table.concat(blockedList, ", "))
+    end
+    if #deadList > 0 then
+        summary = summary .. string.format(" |c888888(%d dead: %s)|r",
+            #deadList, table.concat(deadList, ", "))
+    end
+
     -- Always print to chat (these are rare, high-value events)
     UGT.Chat(summary)
     -- Also write to savedvars log
@@ -459,6 +501,75 @@ function UGT.EmitProcSummary()
 
     -- Store the summary text in the proc entry for offline analysis
     proc.summary = summary
+end
+
+-- ---------------------------------------------------------------------------
+-- Crypt Transfer fallback: fires when activation produced zero energize events
+-- ---------------------------------------------------------------------------
+
+function UGT.EmitCryptTransferFallback()
+    local pending = UGT.pendingCryptTransfer
+    UGT.pendingCryptTransfer = nil
+    if not pending then return end -- was handled by normal energize pipeline
+
+    local source = pending.source or "?"
+    local snapshot = pending.snapshot
+
+    -- Find blocked and dead members from the snapshot
+    local blockedList = {}
+    local deadList = {}
+    if snapshot then
+        for _, m in ipairs(snapshot) do
+            if m.name ~= source then -- skip the caster
+                if m.ultBlocked then
+                    table.insert(blockedList, string.format("%s [%s]",
+                        m.name, m.ultBlockName or "?"))
+                elseif m.isDead then
+                    table.insert(deadList, m.name)
+                end
+            end
+        end
+    end
+
+    local summary = string.format(
+        "|cFFFF00%s|r activated |c00FFFFCrypt Transfer|r, distributing |cFFFFFF0|r ult to 0 targets",
+        source)
+
+    if #blockedList > 0 then
+        summary = summary .. string.format(" |cFF4400(%d blocked: %s)|r",
+            #blockedList, table.concat(blockedList, ", "))
+    end
+    if #deadList > 0 then
+        summary = summary .. string.format(" |c888888(%d dead: %s)|r",
+            #deadList, table.concat(deadList, ", "))
+    end
+
+    UGT.Chat(summary)
+    UGT.Log(summary)
+
+    -- Also save a proc entry for offline analysis
+    if UGT.savedVars and UGT.savedVars.sessions then
+        local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
+        if session then
+            table.insert(session.procs, {
+                time     = pending.time,
+                trigger  = {
+                    abilityId   = 195031,
+                    abilityName = "Crypt Transfer",
+                    source      = source,
+                    setName     = "Crypt Transfer",
+                    hitValue    = 0,
+                    isTrackedSet = true,
+                    zeroRecipients = true,
+                },
+                snapshot = snapshot,
+                summary  = summary,
+            })
+            if #session.procs > UGT.MAX_PROCS then
+                table.remove(session.procs, 1)
+            end
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -527,7 +638,26 @@ function UGT.OnEffectChanged(_, changeType, effectSlot, effectName, unitTag,
         end
     end
 
-    if not isUltBlock then return end
+    if not isUltBlock then
+        -- Check for Crypt Transfer activation (to detect zero-recipient cases)
+        if UGT.CRYPTCANNON_IDS[abilityId]
+            and (changeType == EFFECT_RESULT_GAINED or changeType == EFFECT_RESULT_FULL_REFRESH) then
+
+            local casterName = zo_strformat("<<1>>", unitName or GetUnitName(unitTag) or "?")
+            local snapshot = UGT.GetGroupSnapshot()
+            UGT.pendingCryptTransfer = {
+                time     = GetGameTimeSeconds(),
+                source   = casterName,
+                snapshot = snapshot,
+            }
+            UGT.Log(string.format("|c00FFFFCrypt Transfer activated|r by %s — waiting for energize events...", casterName))
+
+            -- Schedule fallback: if no energize events arrive, emit a "0 targets" summary
+            zo_callLater(function() UGT.EmitCryptTransferFallback() end,
+                math.floor(UGT.SNAPSHOT_DEBOUNCE * 1000) + 100)
+        end
+        return
+    end
 
     local changeName = UGT.GetChangeName(changeType)
 
