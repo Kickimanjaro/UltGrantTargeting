@@ -131,7 +131,7 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 ### Interactions with Dead Players
 
-Dead players cannot gain ultimate, but the question is whether the game counts them as eligible targets — potentially wasting a target slot — or skips them entirely. With only 4 players (Arkasis selects all 3 non-caster), you can't tell: either way the living members receive ult. You need 5+ so the set must choose, and a dead player either occupies one of the 3 slots (reducing living recipients to 2) or is skipped (all 3 living candidates receive).
+Dead players cannot gain ultimate, but the question is whether the game counts them as eligible targets — potentially wasting a target slot — or skips them entirely.
 
 **Players needed: 5 for F1. 4 for F2.**
 
