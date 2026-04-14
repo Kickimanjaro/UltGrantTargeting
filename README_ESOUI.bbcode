@@ -1,0 +1,55 @@
+[SIZE="5"][B]UltGrantTargeting[/B][/SIZE]
+
+[COLOR="DarkOrange"][B]This is a diagnostic/research addon, not intended for general use.[/B][/COLOR]
+
+UltGrantTargeting is a testing tool designed to gather data about how ultimate-granting set effects select their targets. Specifically, it investigates:
+
+[LIST]
+[*]How do [B]Arkasis' Genius[/B], [B]Colovian Highlands General[/B], and [B]Cryptcannon Vestments[/B] choose which group members receive ultimate?
+[*]Is target selection based on proximity, lowest ultimate, group index, or random?
+[*]When a group member [I]cannot[/I] gain ultimate (e.g., during [B]Magma Armor[/B]), does the set skip them and pick someone else, or does it waste a target slot on them?
+[/LIST]
+
+The addon logs every ultimate energize event (ACTION_RESULT_POWER_ENERGIZE with COMBAT_MECHANIC_FLAGS_ULTIMATE) along with a full group state snapshot — each member's ultimate level, position, distance from the caster, combat state, alive/dead status, and whether they're under a Magma Armor effect. All data is saved to SavedVariables for offline analysis.
+
+[COLOR="DarkOrange"][SIZE="4"]Setup[/SIZE][/COLOR]
+
+Install the addon on the character wearing the set under test. For best results, [B]all group participants[/B] should also install:
+
+[LIST]
+[*][URL="https://www.esoui.com/downloads/info1337-LibGroupBroadcast.html"]LibGroupBroadcast[/URL]
+[*][URL="https://www.esoui.com/downloads/info3710-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
+[/LIST]
+
+This allows the addon to read actual ultimate values for all group members in snapshots, rather than just the local player's.
+
+[COLOR="DarkOrange"][SIZE="4"]Slash Commands[/SIZE][/COLOR]
+
+[LIST]
+[*][B]/ugt status[/B] — Show current tracking state and configured set IDs
+[*][B]/ugt snapshot[/B] — Print a group state snapshot to chat (positions, ult, combat status)
+[*][B]/ugt procs[/B] — Show recent tracked set proc events
+[*][B]/ugt recent[/B] — Show all recent ultimate energize events
+[*][B]/ugt clear[/B] — Clear the current session log
+[*][B]/ugt help[/B] — List all commands
+[/LIST]
+
+[COLOR="DarkOrange"][SIZE="4"]Data[/SIZE][/COLOR]
+
+All events are saved to the [B]UltGrantTargetingLog[/B] saved variable. Each tracked set proc includes:
+
+[LIST]
+[*]The triggering ability (source, target, ability ID, ult amount)
+[*]Additional targets that received ult from the same proc (within a 150ms debounce window)
+[*]A full group snapshot at the time of the proc
+[/LIST]
+
+Log out to flush SavedVariables, then review [B]UltGrantTargetingLog.lua[/B] in your SavedVariables folder.
+
+[COLOR="DarkOrange"][SIZE="4"]Tracked Sets[/SIZE][/COLOR]
+
+[LIST]
+[*][B]Arkasis' Genius[/B] — ability ID 142660 (grants +44 ult to you and 3 group members on potion use)
+[*][B]Colovian Highlands General[/B] — ability ID 202843 (grants +15 ult/stack to you and up to 5 group members within 28m on player kill)
+[*][B]Cryptcannon Vestments[/B] (Crypt Transfer) — ability ID 195031 (consumes your ult and distributes it to nearby group members)
+[/LIST]

@@ -3,10 +3,14 @@ UltGrantTargeting = {}
 local UGT = UltGrantTargeting
 
 UGT.name = "UltGrantTargeting"
-UGT.version = "1.1.0"
+UGT.version = "1.3.0"
 UGT.prefix = "|c33CCFF[UGT]|r "
 
 UGT.savedVars = nil
+
+-- Verbose mode: when false (default), chat output is suppressed but
+-- everything is still written to SavedVariables for offline analysis.
+UGT.verbose = false
 
 -- ---------------------------------------------------------------------------
 -- Known ability IDs
@@ -62,6 +66,13 @@ UGT.SNAPSHOT_DEBOUNCE = 0.15 -- seconds
 UGT.lgcs = nil
 
 -- ---------------------------------------------------------------------------
+-- SavedVar size limits (overridable via /ugt limit)
+-- ---------------------------------------------------------------------------
+UGT.MAX_SESSIONS    = 10    -- oldest sessions pruned at startup
+UGT.MAX_PROCS       = 500   -- per session, oldest dropped on insert
+UGT.MAX_LOG_ENTRIES  = 2000  -- per session, oldest dropped on insert
+
+-- ---------------------------------------------------------------------------
 -- Readable name tables
 -- ---------------------------------------------------------------------------
 
@@ -104,9 +115,11 @@ end
 -- Logging (dual: chat + savedvars)
 -- ---------------------------------------------------------------------------
 
+-- Log: always writes to savedvars, only prints to chat if verbose mode is on
 function UGT.Log(msg)
-    local text = UGT.prefix .. tostring(msg)
-    d(text)
+    if UGT.verbose then
+        d(UGT.prefix .. tostring(msg))
+    end
     if UGT.savedVars and UGT.savedVars.sessions then
         local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
         if session then
@@ -114,7 +127,41 @@ function UGT.Log(msg)
                 time = GetGameTimeSeconds(),
                 msg = tostring(msg),
             })
+            -- Prune log if over limit (cheap: only fires when actually over)
+            if #session.log > UGT.MAX_LOG_ENTRIES then
+                table.remove(session.log, 1)
+            end
         end
+    end
+end
+
+-- Chat: always prints to chat (for load messages, command responses)
+function UGT.Chat(msg)
+    d(UGT.prefix .. tostring(msg))
+end
+
+-- ---------------------------------------------------------------------------
+-- SavedVar pruning
+-- ---------------------------------------------------------------------------
+
+-- Trim sessions list to MAX_SESSIONS (keeps newest)
+function UGT.PruneSessions()
+    if not UGT.savedVars or not UGT.savedVars.sessions then return end
+    while #UGT.savedVars.sessions > UGT.MAX_SESSIONS do
+        table.remove(UGT.savedVars.sessions, 1)
+    end
+end
+
+-- Trim current session's log and procs tables
+function UGT.PruneCurrentSession()
+    if not UGT.savedVars or not UGT.savedVars.sessions then return end
+    local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
+    if not session then return end
+    while #session.log > UGT.MAX_LOG_ENTRIES do
+        table.remove(session.log, 1)
+    end
+    while #session.procs > UGT.MAX_PROCS do
+        table.remove(session.procs, 1)
     end
 end
 
@@ -132,7 +179,7 @@ function UGT.GetGroupSnapshot()
         local px, py = GetMapPlayerPosition("player")
         table.insert(snapshot, {
             tag         = "player",
-            name        = GetUnitName("player"),
+            name        = zo_strformat("<<1>>", GetUnitName("player")),
             ultCurrent  = current,
             ultMax      = max,
             inCombat    = IsUnitInCombat("player"),
@@ -161,6 +208,7 @@ function UGT.GetGroupSnapshot()
                 local ultData = UGT.lgcs:GetUnitULT(tag)
                 if ultData and ultData.ultValue then
                     current = ultData.ultValue
+                    max = 500 -- ESO max ult is always 500; GetUnitPower returns 0 for remote players
                 end
             end
 
@@ -175,7 +223,7 @@ function UGT.GetGroupSnapshot()
 
             table.insert(snapshot, {
                 tag         = tag,
-                name        = GetUnitName(tag) or "?",
+                name        = zo_strformat("<<1>>", GetUnitName(tag)) or "?",
                 ultCurrent  = current,
                 ultMax      = max,
                 inCombat    = IsUnitInCombat(tag),
@@ -194,14 +242,15 @@ function UGT.GetGroupSnapshot()
     return snapshot
 end
 
-function UGT.PrintGroupSnapshot(snapshot, label)
-    UGT.Log(label .. " (" .. #snapshot .. " members):")
+function UGT.PrintGroupSnapshot(snapshot, label, outputFn)
+    local out = outputFn or UGT.Log
+    out(label .. " (" .. #snapshot .. " members):")
     for _, m in ipairs(snapshot) do
         local magmaTag = m.magmaArmor and " |cFF0000[MAGMA ARMOR]|r" or ""
         local deadTag = m.isDead and " |c888888[DEAD]|r" or ""
         local meTag = m.isPlayer and " |c00FF00<< YOU >>|r" or ""
         local distStr = m.distNorm and string.format("  dist=%.4f", m.distNorm) or ""
-        UGT.Log(string.format("  %s %s: ult=%d/%d  combat=%s  pos=(%.4f,%.4f)%s%s%s%s",
+        out(string.format("  %s %s: ult=%d/%d  combat=%s  pos=(%.4f,%.4f)%s%s%s%s",
             m.tag, m.name, m.ultCurrent, m.ultMax,
             tostring(m.inCombat), m.posX, m.posY,
             distStr, magmaTag, deadTag, meTag))
@@ -242,7 +291,7 @@ end
 function UGT.DumpAllBuffs(unitTag)
     local numBuffs = GetNumBuffs(unitTag)
     local now = GetGameTimeSeconds()
-    UGT.Log(string.format("Buffs on %s (%s) — %d total:",
+    UGT.Chat(string.format("Buffs on %s (%s) — %d total:",
         unitTag, GetUnitName(unitTag) or "?", numBuffs))
     for i = 1, numBuffs do
         local buffName, timeStarted, timeEnding, buffSlot, stackCount,
@@ -254,7 +303,7 @@ function UGT.DumpAllBuffs(unitTag)
         local timeStr = remaining >= 0 and string.format("%.1fs", remaining) or "permanent"
         local magmaTag = UGT.IsMagmaArmorAbility(abilityId) and " |cFF0000*** MAGMA ***|r" or ""
 
-        UGT.Log(string.format("  [%d] %s  stacks=%d  type=%s  atype=%s  %s%s",
+        UGT.Chat(string.format("  [%d] %s  stacks=%d  type=%s  atype=%s  %s%s",
             abilityId, buffName or "?", stackCount,
             tostring(effectType), tostring(abilityType),
             timeStr, magmaTag))
@@ -279,14 +328,18 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
     local isTrackedSet = UGT.TRACKED_SET_IDS[abilityId] or false
     local setName = isTrackedSet or nil
 
+    -- Strip gender/number decorators (^Fx, ^Mx, etc.) from combat event names
+    sourceName = sourceName and zo_strformat("<<1>>", sourceName) or "?"
+    targetName = targetName and zo_strformat("<<1>>", targetName) or "?"
+
     -- Store recent energize event
     local entry = {
         time        = now,
         abilityId   = abilityId,
         abilityName = abilityName or "?",
-        source      = sourceName or "?",
+        source      = sourceName,
         sourceType  = sourceType,
-        target      = targetName or "?",
+        target      = targetName,
         targetType  = targetType,
         hitValue    = hitValue,
         isTrackedSet = isTrackedSet and true or false,
@@ -319,7 +372,7 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
 
     UGT.Log(string.format("%sULT ENERGIZE|r: [%d] %s  %s → %s  +%d ult%s%s",
         color, abilityId, abilityName or "?",
-        sourceName or "?", targetName or "?",
+        sourceName, targetName,
         hitValue, setTag, magmaTag))
 
     -- Trigger group snapshot (debounced so a multi-target proc only takes one)
@@ -336,6 +389,9 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
                     trigger     = entry,
                     snapshot    = snapshot,
                 })
+                if #session.procs > UGT.MAX_PROCS then
+                    table.remove(session.procs, 1)
+                end
             end
         end
 
@@ -383,9 +439,12 @@ function UGT.OnDiscoveryCombatEvent(_, result, isError, abilityName, abilityGrap
         powerLabel = tostring(powerType)
     end
 
+    sourceName = sourceName and zo_strformat("<<1>>", sourceName) or "?"
+    targetName = targetName and zo_strformat("<<1>>", targetName) or "?"
+
     UGT.Log(string.format("|cFF00FFDISCOVERY|r: [%d] %s  %s → %s  +%d %s  sourceType=%s  targetType=%s",
         abilityId, abilityName or "?",
-        sourceName or "?", targetName or "?",
+        sourceName, targetName,
         hitValue, powerLabel,
         tostring(sourceType), tostring(targetType)))
 end
@@ -454,48 +513,52 @@ end
 -- ---------------------------------------------------------------------------
 
 function UGT.SlashCommand(args)
-    local cmd = args and zo_strlower(args) or ""
+    local input = args and zo_strlower(args) or ""
+    local cmd, rest = input:match("^(%S+)%s*(.*)")
+    cmd = cmd or ""
+    rest = rest or ""
 
     if cmd == "status" or cmd == "" then
-        UGT.Log("--- UltGrantTargeting Status ---")
+        UGT.Chat("--- UltGrantTargeting Status ---")
 
         -- Player info
         local current, max = GetUnitPower("player", COMBAT_MECHANIC_FLAGS_ULTIMATE)
-        UGT.Log(string.format("  Ultimate: %d / %d", current, max))
-        UGT.Log("  In combat: " .. tostring(IsUnitInCombat("player")))
+        UGT.Chat(string.format("  Ultimate: %d / %d", current, max))
+        UGT.Chat("  In combat: " .. tostring(IsUnitInCombat("player")))
 
         -- Magma Armor state
         local magmaCount = 0
         for tag, info in pairs(UGT.magmaArmorActive) do
             magmaCount = magmaCount + 1
             local name = GetUnitName(tag) or "?"
-            UGT.Log(string.format("  |cFF0000Magma Armor active|r: %s (%s) — [%d] %s",
+            UGT.Chat(string.format("  |cFF0000Magma Armor active|r: %s (%s) — [%d] %s",
                 tag, name, info.abilityId, info.name))
         end
         if magmaCount == 0 then
-            UGT.Log("  Magma Armor: |c00FF00none active|r")
+            UGT.Chat("  Magma Armor: |c00FF00none active|r")
         end
 
         -- Group snapshot
         local snapshot = UGT.GetGroupSnapshot()
-        UGT.PrintGroupSnapshot(snapshot, "  Current group state")
+        UGT.PrintGroupSnapshot(snapshot, "  Current group state", UGT.Chat)
 
         -- Session stats
         if UGT.savedVars and UGT.savedVars.sessions then
             local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
             if session then
-                UGT.Log(string.format("  Session: %d procs, %d log entries",
+                UGT.Chat(string.format("  Session: %d procs, %d log entries",
                     #session.procs, #session.log))
             end
         end
 
-        -- Discovery mode
-        UGT.Log("  Discovery mode: " .. (UGT.discoveryMode and "|cFF00FFON|r" or "|c888888OFF|r"))
-        UGT.Log("  LGCS: " .. (UGT.lgcs and "|c00FF00connected|r" or "|cFF4400not loaded|r"))
+        -- Mode info
+        UGT.Chat("  Verbose: " .. (UGT.verbose and "|c00FF00ON|r" or "|c888888OFF|r (data still saved to SavedVars)"))
+        UGT.Chat("  Discovery mode: " .. (UGT.discoveryMode and "|cFF00FFON|r" or "|c888888OFF|r"))
+        UGT.Chat("  LGCS: " .. (UGT.lgcs and "|c00FF00connected|r" or "|cFF4400not loaded|r"))
 
     elseif cmd == "snapshot" then
         local snapshot = UGT.GetGroupSnapshot()
-        UGT.PrintGroupSnapshot(snapshot, "Manual snapshot")
+        UGT.PrintGroupSnapshot(snapshot, "Manual snapshot", UGT.Chat)
 
         -- Save to session
         if UGT.savedVars and UGT.savedVars.sessions then
@@ -532,24 +595,28 @@ function UGT.SlashCommand(args)
         if UGT.discoveryMode then
             EVENT_MANAGER:RegisterForEvent(UGT.name .. "_Discovery", EVENT_COMBAT_EVENT,
                 UGT.OnDiscoveryCombatEvent)
-            UGT.Log("|cFF00FFDiscovery mode ON|r — logging ALL POWER_ENERGIZE events.")
-            UGT.Log("Drink a potion with Arkasis equipped to find the proc ability ID.")
+            UGT.Chat("|cFF00FFDiscovery mode ON|r — logging ALL POWER_ENERGIZE events.")
+            UGT.Chat("Drink a potion with Arkasis equipped to find the proc ability ID.")
         else
             EVENT_MANAGER:UnregisterForEvent(UGT.name .. "_Discovery", EVENT_COMBAT_EVENT)
-            UGT.Log("Discovery mode OFF.")
+            UGT.Chat("Discovery mode OFF.")
         end
+
+    elseif cmd == "verbose" then
+        UGT.verbose = not UGT.verbose
+        UGT.Chat("Verbose mode: " .. (UGT.verbose and "|c00FF00ON|r — all events shown in chat" or "|c888888OFF|r — data saved silently to SavedVars"))
 
     elseif cmd == "procs" then
         if not UGT.savedVars or not UGT.savedVars.sessions then
-            UGT.Log("No data.")
+            UGT.Chat("No data.")
             return
         end
         local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
         if not session or #session.procs == 0 then
-            UGT.Log("No procs recorded this session.")
+            UGT.Chat("No procs recorded this session.")
             return
         end
-        UGT.Log(string.format("--- %d proc events this session ---", #session.procs))
+        UGT.Chat(string.format("--- %d proc events this session ---", #session.procs))
         local start = math.max(1, #session.procs - 9)
         for i = start, #session.procs do
             local p = session.procs[i]
@@ -560,22 +627,53 @@ function UGT.SlashCommand(args)
                     p.trigger.target or "?", p.trigger.hitValue or 0)
             end
             local extraCount = p.additionalTargets and #p.additionalTargets or 0
-            UGT.Log(string.format("  #%d (t=%.1f): %s  (+%d other targets)  snapshot=%d members",
+            UGT.Chat(string.format("  #%d (t=%.1f): %s  (+%d other targets)  snapshot=%d members",
                 i, p.time, triggerStr, extraCount, #p.snapshot))
         end
 
     elseif cmd == "recent" then
         if #UGT.recentEnergizes == 0 then
-            UGT.Log("No recent energize events.")
+            UGT.Chat("No recent energize events.")
             return
         end
-        UGT.Log(string.format("--- Last %d ult energize events ---", math.min(15, #UGT.recentEnergizes)))
+        UGT.Chat(string.format("--- Last %d ult energize events ---", math.min(15, #UGT.recentEnergizes)))
         local start = math.max(1, #UGT.recentEnergizes - 14)
         for i = start, #UGT.recentEnergizes do
             local e = UGT.recentEnergizes[i]
             local setTag = e.isTrackedSet and (" [" .. e.setName .. "]") or ""
-            UGT.Log(string.format("  [%d] %s  %s → %s  +%d%s",
+            UGT.Chat(string.format("  [%d] %s  %s → %s  +%d%s",
                 e.abilityId, e.abilityName, e.source, e.target, e.hitValue, setTag))
+        end
+
+    elseif cmd == "limit" then
+        local what, val = rest:match("^(%S+)%s+(%d+)$")
+        if what and val then
+            val = tonumber(val)
+            if what == "procs" then
+                UGT.MAX_PROCS = val
+                UGT.PruneCurrentSession()
+                UGT.Chat(string.format("Max procs per session set to %d.", val))
+            elseif what == "log" then
+                UGT.MAX_LOG_ENTRIES = val
+                UGT.PruneCurrentSession()
+                UGT.Chat(string.format("Max log entries per session set to %d.", val))
+            elseif what == "sessions" then
+                UGT.MAX_SESSIONS = val
+                UGT.PruneSessions()
+                UGT.Chat(string.format("Max sessions set to %d.", val))
+            else
+                UGT.Chat("Unknown limit: " .. what .. ". Use: procs, log, sessions")
+            end
+        else
+            UGT.Chat("Current limits:")
+            UGT.Chat(string.format("  sessions = %d  (current: %d)",
+                UGT.MAX_SESSIONS, UGT.savedVars and #UGT.savedVars.sessions or 0))
+            local session = UGT.savedVars and UGT.savedVars.sessions and UGT.savedVars.sessions[#UGT.savedVars.sessions]
+            UGT.Chat(string.format("  procs    = %d  (current session: %d)",
+                UGT.MAX_PROCS, session and #session.procs or 0))
+            UGT.Chat(string.format("  log      = %d  (current session: %d)",
+                UGT.MAX_LOG_ENTRIES, session and #session.log or 0))
+            UGT.Chat("  Set with: /ugt limit <procs|log|sessions> <number>")
         end
 
     elseif cmd == "clear" then
@@ -585,21 +683,23 @@ function UGT.SlashCommand(args)
         end
         UGT.recentEnergizes = {}
         UGT.magmaArmorActive = {}
-        UGT.Log("Log cleared, session reset.")
+        UGT.Chat("Log cleared, session reset.")
 
     elseif cmd == "help" then
-        UGT.Log("Commands: /ugt status | snapshot | scan | scangroup | discover | procs | recent | clear | help")
-        UGT.Log("  status    — Current ult, group state, Magma Armor tracking")
-        UGT.Log("  snapshot  — Manual group state snapshot to log")
-        UGT.Log("  scan      — Dump all buffs on self (ID discovery)")
-        UGT.Log("  scangroup — Dump all buffs on all group members")
-        UGT.Log("  discover  — Toggle discovery mode (logs ALL energize events)")
-        UGT.Log("  procs     — Show recent set proc events with snapshots")
-        UGT.Log("  recent    — Show recent ult energize events")
-        UGT.Log("  clear     — Wipe session data")
+        UGT.Chat("Commands: /ugt status | verbose | snapshot | scan | scangroup | discover | procs | recent | limit | clear | help")
+        UGT.Chat("  status    — Current ult, group state, Magma Armor tracking")
+        UGT.Chat("  verbose   — Toggle verbose mode (show events in chat)")
+        UGT.Chat("  snapshot  — Manual group state snapshot to log")
+        UGT.Chat("  scan      — Dump all buffs on self (ID discovery)")
+        UGT.Chat("  scangroup — Dump all buffs on all group members")
+        UGT.Chat("  discover  — Toggle discovery mode (logs ALL energize events)")
+        UGT.Chat("  procs     — Show recent set proc events with snapshots")
+        UGT.Chat("  recent    — Show recent ult energize events")
+        UGT.Chat("  limit     — View/set savedvar size limits")
+        UGT.Chat("  clear     — Wipe session data")
 
     else
-        UGT.Log("Unknown command. Use /ugt help")
+        UGT.Chat("Unknown command. Use /ugt help")
     end
 end
 
@@ -615,6 +715,7 @@ function UGT.StartSession()
             procs   = {},
             log     = {},
         })
+        UGT.PruneSessions()
     end
 end
 
@@ -690,6 +791,10 @@ function UGT.OnAddonLoaded(_, addonName)
     -- -------------------------------------------------------------------
     SLASH_COMMANDS["/ugt"] = UGT.SlashCommand
 
+    UGT.Chat("|c33CCFFUltGrantTargeting v" .. UGT.version .. "|r active — collecting data silently to SavedVars. |c888888/ugt help|r")
+    UGT.Chat("|cFF4400Remember to remove this addon when testing is complete.|r")
+
+    -- Log detailed info to savedvars only
     UGT.Log("Loaded v" .. UGT.version)
     local trackedCount = 0
     for _ in pairs(UGT.TRACKED_SET_IDS) do trackedCount = trackedCount + 1 end
@@ -700,13 +805,14 @@ function UGT.OnAddonLoaded(_, addonName)
         end
         UGT.Log("  Tracking set proc IDs: " .. table.concat(ids, ", "))
     else
-        UGT.Log("  |cFFFF00No set proc IDs configured yet.|r Use |c33CCFF/ugt discover|r to find them.")
+        UGT.Log("  No set proc IDs configured yet.")
     end
     UGT.Log("  Tracking Magma Armor IDs: 15957, 17874, 17878")
-    if not UGT.lgcs then
-        UGT.Log("  |cFFFF00LibGroupCombatStats not found|r — group ult values will show 0 in snapshots.")
+    if UGT.lgcs then
+        UGT.Log("  LibGroupCombatStats connected.")
+    else
+        UGT.Log("  LibGroupCombatStats not found — group ult values will show 0 in snapshots.")
     end
-    UGT.Log("  Use |c33CCFF/ugt help|r for commands")
 end
 
 EVENT_MANAGER:RegisterForEvent(UGT.name, EVENT_ADD_ON_LOADED, UGT.OnAddonLoaded)
