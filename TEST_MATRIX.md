@@ -158,7 +158,6 @@ After each test:
 
 ## Notes
 
-- **Tooltip says 42, actual grant is 44.** Every observed Arkasis proc in savedvars shows `hitValue = 44`. The test matrix uses the real value (44).
 - **Max-ult suppression**: When a player is already at max ultimate, the game does not fire an energize event at all — it doesn't send a "wasted" event with 0 gain. This means event counting is unreliable if any candidate is at ult cap: they'll look like they were skipped even if they were targeted. **Ensure test participants are not at max ult** when running any event-counting test (Magma Armor, dead player, etc.).
 - `GetMapPlayerPosition` returns normalized (0–1) coordinates. Distance values are relative within a zone; absolute meter calibration requires a known reference (e.g., Rapid Maneuver 28m radius).
 - The addon integrates with LibGroupCombatStats (via LibGroupBroadcast) to read group members' actual ult values in snapshots. All participants should have LGB+LGCS installed for this to work.
