@@ -131,12 +131,14 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 ### Interactions with Dead Players
 
-**Players needed: 2.**
+Dead players cannot gain ultimate, but the question is whether the game counts them as eligible targets — potentially wasting a target slot — or skips them entirely. With only 4 players (Arkasis selects all 3 non-caster), you can't tell: either way the living members receive ult. You need 5+ so the set must choose, and a dead player either occupies one of the 3 slots (reducing living recipients to 2) or is skipped (all 3 living candidates receive).
+
+**Players needed: 5 for F1. 4 for F2.**
 
 | # | Test | Players | Setup | Steps | Expected | Actual |
 |---|------|---------|-------|-------|----------|--------|
-| F1 | Dead member — Arkasis | 2 | One member dead within range. Drink potion. | Does dead member receive ult? | Probably not | |
-| F2 | Dead member — Cryptcannon | 2 | One member dead within range. Activate Crypt Transfer. | Does dead member receive ult? | Probably not | |
+| F1 | Dead member — Arkasis (slot wasted?) | 5 | All within 5m. One of the 4 candidates is dead. Arkasis wearer drinks potion. | Count energize events to living players. 3 events = dead player skipped (all living candidates received). 2 events = dead player consumed a slot. | ??? | |
+| F2 | Dead member — Cryptcannon (share lost?) | 4 | All within 5m. One member dead. Caster at 500 ult. Activate Crypt Transfer. | How much ult do the 2 living members receive? 250 each = dead skipped, ult redistributed. ~166 each = dead player counted, share lost. | ??? | |
 
 ---
 
