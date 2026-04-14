@@ -14,22 +14,27 @@ The addon logs every ultimate energize event (ACTION_RESULT_POWER_ENERGIZE with 
 
 [COLOR="DarkOrange"][SIZE="4"]Setup[/SIZE][/COLOR]
 
-Install the addon on the character wearing the set under test. For best results, [B]all group participants[/B] should also install:
+[B]Required dependency:[/B] [URL="https://www.esoui.com/downloads/info3710-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
 
+LibGroupCombatStats has its own requirements that you'll also need to install:
 [LIST]
+[*][URL="https://www.esoui.com/downloads/info2075-LibCombat.html"]LibCombat[/URL]
 [*][URL="https://www.esoui.com/downloads/info1337-LibGroupBroadcast.html"]LibGroupBroadcast[/URL]
-[*][URL="https://www.esoui.com/downloads/info3710-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
+[*][URL="https://www.esoui.com/downloads/info2382-LibDebugLogger.html"]LibDebugLogger[/URL]
+[*][URL="https://www.esoui.com/downloads/info7-LibAddonMenu.html"]LibAddonMenu-2.0[/URL]
 [/LIST]
 
-This allows the addon to read actual ultimate values for all group members in snapshots, rather than just the local player's.
+For best results, [B]all group participants[/B] should install the full set so that everyone's ultimate values are broadcast to each other.
 
 [COLOR="DarkOrange"][SIZE="4"]Slash Commands[/SIZE][/COLOR]
 
 [LIST]
 [*][B]/ugt status[/B] — Show current tracking state and configured set IDs
+[*][B]/ugt verbose[/B] — Toggle verbose mode (show events in chat; off by default)
 [*][B]/ugt snapshot[/B] — Print a group state snapshot to chat (positions, ult, combat status)
 [*][B]/ugt procs[/B] — Show recent tracked set proc events
 [*][B]/ugt recent[/B] — Show all recent ultimate energize events
+[*][B]/ugt limit[/B] — View or set savedvar size limits (sessions, procs, log entries)
 [*][B]/ugt clear[/B] — Clear the current session log
 [*][B]/ugt help[/B] — List all commands
 [/LIST]

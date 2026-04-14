@@ -753,7 +753,7 @@ function UGT.OnAddonLoaded(_, addonName)
     UGT.RebuildTrackedSetIDs()
 
     -- -------------------------------------------------------------------
-    -- LibGroupCombatStats integration (optional)
+    -- LibGroupCombatStats integration (required dependency)
     -- Provides actual ult values for group members in snapshots
     -- -------------------------------------------------------------------
     if LibGroupCombatStats and LibGroupCombatStats.RegisterAddon then
