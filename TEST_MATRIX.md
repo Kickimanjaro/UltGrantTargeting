@@ -145,6 +145,14 @@ Dead players cannot gain ultimate, but the question is whether the game counts t
 
 ## Data Analysis
 
+**Before each test**, annotate the log with the test ID:
+
+```
+/ugt note C1: Magma Armor — targeted or skipped? DK in Magma, potion at ~2s
+```
+
+This inserts a timestamped marker with a group snapshot into the savedvar, so an AI reviewer can clearly identify test boundaries and conditions. Use the test ID from the matrix (e.g., A1, B3, C1, E5, F1) and a brief description of the setup.
+
 After each test:
 
 1. `/ugt procs` — review recent proc events in chat

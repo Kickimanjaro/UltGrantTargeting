@@ -185,7 +185,7 @@ function UGT.GetGroupSnapshot()
 
     if groupSize <= 0 then
         -- Solo: just capture self
-        local current, max, effectiveMax = GetUnitPower("player", COMBAT_MECHANIC_FLAGS_ULTIMATE)
+        local current, max, _ = GetUnitPower("player", COMBAT_MECHANIC_FLAGS_ULTIMATE)
         local px, py = GetMapPlayerPosition("player")
         table.insert(snapshot, {
             tag         = "player",
@@ -198,6 +198,7 @@ function UGT.GetGroupSnapshot()
             ultBlockName = UGT.ultBlockActive["player"] and UGT.ultBlockActive["player"].name or nil,
             posX        = px,
             posY        = py,
+            distNorm    = 0,
             isPlayer    = true,
             isDead      = IsUnitDead("player"),
             isOnline    = true,
@@ -210,7 +211,7 @@ function UGT.GetGroupSnapshot()
     for i = 1, groupSize do
         local tag = GetGroupUnitTagByIndex(i)
         if tag and DoesUnitExist(tag) then
-            local current, max, effectiveMax = GetUnitPower(tag, COMBAT_MECHANIC_FLAGS_ULTIMATE)
+            local current, max, _ = GetUnitPower(tag, COMBAT_MECHANIC_FLAGS_ULTIMATE)
             local px, py = GetMapPlayerPosition(tag)
             local isMe = AreUnitsEqual(tag, "player")
 
@@ -311,9 +312,7 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
         hitValue, powerType, damageType, log, sourceUnitId, targetUnitId,
         abilityId, overflow)
 
-    -- Only care about ultimate energizes
-    if powerType ~= COMBAT_MECHANIC_FLAGS_ULTIMATE then return end
-
+    -- powerType == ULTIMATE is guaranteed by REGISTER_FILTER_POWER_TYPE
     local now = GetGameTimeSeconds()
     local isTrackedSet = UGT.TRACKED_SET_IDS[abilityId] or false
     local setName = isTrackedSet or nil
@@ -364,6 +363,9 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
         color, abilityId, abilityName or "?",
         sourceName, targetName,
         hitValue, setTag, ultBlockTag))
+
+    -- Only create structured proc entries (with snapshots) for tracked set procs
+    if not isTrackedSet then return end
 
     -- Trigger group snapshot (debounced so a multi-target proc only takes one)
     if now - UGT.lastSnapshotTime >= UGT.SNAPSHOT_DEBOUNCE then
@@ -488,8 +490,13 @@ function UGT.EmitProcSummary()
     -- Also write to savedvars log
     UGT.Log(summary)
 
-    -- Store the summary text in the proc entry for offline analysis
-    proc.summary = summary
+    -- Store a clean (no color codes) summary in the proc entry for offline analysis
+    proc.summary = summary:gsub("|c%x%x%x%x%x%x", ""):gsub("|r", "")
+end
+
+-- Strip ESO color codes from a string for savedvar storage
+function UGT.StripColorCodes(str)
+    return str:gsub("|c%x%x%x%x%x%x", ""):gsub("|r", "")
 end
 
 -- ---------------------------------------------------------------------------
@@ -743,6 +750,29 @@ function UGT.SlashCommand(args)
             UGT.Chat("  Set with: /ugt limit <procs|log|sessions> <number>")
         end
 
+    elseif cmd == "note" then
+        if rest == "" then
+            UGT.Chat("Usage: /ugt note <text>  — e.g. /ugt note C1: Magma Armor targeted or skipped?")
+            return
+        end
+        local snapshot = UGT.GetGroupSnapshot()
+        local noteEntry = {
+            time     = GetGameTimeSeconds(),
+            trigger  = { manual = true, note = rest },
+            snapshot = snapshot,
+        }
+        if UGT.savedVars and UGT.savedVars.sessions then
+            local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
+            if session then
+                table.insert(session.procs, noteEntry)
+                if #session.procs > UGT.MAX_PROCS then
+                    table.remove(session.procs, 1)
+                end
+            end
+        end
+        UGT.Log(string.format("|cFFFF00NOTE|r: %s", rest))
+        UGT.Chat(string.format("|cFFFF00NOTE|r: %s  (snapshot saved with %d members)", rest, #snapshot))
+
     elseif cmd == "clear" then
         if UGT.savedVars then
             UGT.savedVars.sessions = {}
@@ -753,7 +783,7 @@ function UGT.SlashCommand(args)
         UGT.Chat("Log cleared, session reset.")
 
     elseif cmd == "help" then
-        UGT.Chat("Commands: /ugt status | verbose | snapshot | scan | discover | procs | recent | limit | clear | help")
+        UGT.Chat("Commands: /ugt status | verbose | snapshot | scan | discover | procs | recent | note | limit | clear | help")
         UGT.Chat("  status    — Current ult, group state, ult-block tracking")
         UGT.Chat("  verbose   — Toggle verbose mode (show events in chat)")
         UGT.Chat("  snapshot  — Manual group state snapshot to log")
@@ -761,6 +791,7 @@ function UGT.SlashCommand(args)
         UGT.Chat("  discover  — Toggle discovery mode (logs ALL energize events)")
         UGT.Chat("  procs     — Show recent set proc events with snapshots")
         UGT.Chat("  recent    — Show recent ult energize events")
+        UGT.Chat("  note      — Annotate the log: /ugt note <text>")
         UGT.Chat("  limit     — View/set savedvar size limits")
         UGT.Chat("  clear     — Wipe session data")
 
