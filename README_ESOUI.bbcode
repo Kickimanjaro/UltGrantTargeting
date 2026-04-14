@@ -12,6 +12,8 @@ UltGrantTargeting is a testing tool designed to gather data about how ultimate-g
 
 The addon logs every ultimate energize event (ACTION_RESULT_POWER_ENERGIZE with COMBAT_MECHANIC_FLAGS_ULTIMATE) along with a full group state snapshot — each member's ultimate level, position, distance from the caster, combat state, alive/dead/online status, and whether they're under an ability that blocks ultimate gain. All data is saved to SavedVariables for offline analysis.
 
+[URL="https://github.com/Kickimanjaro/UltGrantTargeting"]Source on GitHub[/URL]
+
 [COLOR="DarkOrange"][SIZE="4"]Setup[/SIZE][/COLOR]
 
 [B]Required dependency:[/B] [URL="https://www.esoui.com/downloads/info4024-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
@@ -64,7 +66,7 @@ To keep the saved variable file from growing unbounded, all storage is capped wi
 
 All three limits can be viewed and adjusted in-game with [B]/ugt limit[/B]. The current session can also be wiped at any time with [B]/ugt clear[/B].
 
-Log out to flush SavedVariables, then review [B]UltGrantTargetingLog.lua[/B] in your SavedVariables folder.
+You can then later review [B]UltGrantTargeting.lua[/B] in your SavedVariables folder.
 
 [COLOR="DarkOrange"][SIZE="4"]Tracked Sets[/SIZE][/COLOR]
 
