@@ -16,11 +16,18 @@ UGT.verbose = false
 -- Known ability IDs
 -- ---------------------------------------------------------------------------
 
--- Magma Armor and morphs (prevent ultimate gain for their duration, 10s)
+-- Ult-blocking abilities: prevent the activator from gaining ultimate
+-- Magma Armor and morphs (10s)
 UGT.MAGMA_ARMOR_IDS = {
     [15957] = "Magma Armor",
     [17874] = "Magma Shell",
     [17878] = "Corrosive Armor",
+}
+-- Bone Goliath Transformation and morphs (20s)
+UGT.BONE_GOLIATH_IDS = {
+    [115001] = "Bone Goliath Transformation",
+    [118664] = "Pummeling Goliath",
+    [118279] = "Ravenous Goliath",
 }
 
 -- Set IDs (for reference / future use with LibSets)
@@ -49,8 +56,8 @@ UGT.TRACKED_SET_IDS = {}
 -- State tracking
 -- ---------------------------------------------------------------------------
 
--- magmaArmorActive[unitTag] = { abilityId = id, name = name, endTime = t }
-UGT.magmaArmorActive = {}
+-- ultBlockActive[unitTag] = { abilityId = id, name = name, endTime = t }
+UGT.ultBlockActive = {}
 
 -- Recent ult energize events for correlation (ring buffer, last N)
 UGT.recentEnergizes = {}
@@ -61,6 +68,9 @@ UGT.MAX_RECENT = 50
 -- one snapshot rather than N.
 UGT.lastSnapshotTime = 0
 UGT.SNAPSHOT_DEBOUNCE = 0.15 -- seconds
+
+-- Pending summary: index of the proc entry awaiting summary after debounce
+UGT.pendingSummaryProcIdx = nil
 
 -- LibGroupCombatStats integration (optional, populated on load)
 UGT.lgcs = nil
@@ -76,25 +86,6 @@ UGT.MAX_LOG_ENTRIES  = 2000  -- per session, oldest dropped on insert
 -- Readable name tables
 -- ---------------------------------------------------------------------------
 
-UGT.ACTION_RESULT_NAMES = {
-    [ACTION_RESULT_DAMAGE]              = "DAMAGE",
-    [ACTION_RESULT_CRITICAL_DAMAGE]     = "CRIT_DMG",
-    [ACTION_RESULT_DOT_TICK]            = "DOT",
-    [ACTION_RESULT_DOT_TICK_CRITICAL]   = "DOT_CRIT",
-    [ACTION_RESULT_HEAL]                = "HEAL",
-    [ACTION_RESULT_CRITICAL_HEAL]       = "CRIT_HEAL",
-    [ACTION_RESULT_HOT_TICK]            = "HOT",
-    [ACTION_RESULT_HOT_TICK_CRITICAL]   = "HOT_CRIT",
-    [ACTION_RESULT_POWER_ENERGIZE]      = "POWER_ENERGIZE",
-    [ACTION_RESULT_POWER_DRAIN]         = "POWER_DRAIN",
-    [ACTION_RESULT_IMMUNE]              = "IMMUNE",
-    [ACTION_RESULT_BLOCKED]             = "BLOCKED",
-    [ACTION_RESULT_MISS]                = "MISS",
-    [ACTION_RESULT_RESIST]              = "RESIST",
-    [ACTION_RESULT_EFFECT_GAINED]       = "EFFECT_GAINED",
-    [ACTION_RESULT_EFFECT_FADED]        = "EFFECT_FADED",
-}
-
 UGT.EFFECT_CHANGE_NAMES = {
     [EFFECT_RESULT_GAINED]       = "GAINED",
     [EFFECT_RESULT_FADED]        = "FADED",
@@ -102,10 +93,6 @@ UGT.EFFECT_CHANGE_NAMES = {
     [EFFECT_RESULT_FULL_REFRESH] = "REFRESH",
     [EFFECT_RESULT_TRANSFER]     = "TRANSFER",
 }
-
-function UGT.GetResultName(result)
-    return UGT.ACTION_RESULT_NAMES[result] or tostring(result)
-end
 
 function UGT.GetChangeName(changeType)
     return UGT.EFFECT_CHANGE_NAMES[changeType] or tostring(changeType)
@@ -115,7 +102,8 @@ end
 -- Logging (dual: chat + savedvars)
 -- ---------------------------------------------------------------------------
 
--- Log: always writes to savedvars, only prints to chat if verbose mode is on
+-- Log: always writes to savedvars, only prints to chat if verbose mode is on.
+-- Uses a ring buffer to avoid O(n) shifts from table.remove(..., 1).
 function UGT.Log(msg)
     if UGT.verbose then
         d(UGT.prefix .. tostring(msg))
@@ -123,16 +111,36 @@ function UGT.Log(msg)
     if UGT.savedVars and UGT.savedVars.sessions then
         local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
         if session then
-            table.insert(session.log, {
+            local entry = {
                 time = GetGameTimeSeconds(),
                 msg = tostring(msg),
-            })
-            -- Prune log if over limit (cheap: only fires when actually over)
-            if #session.log > UGT.MAX_LOG_ENTRIES then
-                table.remove(session.log, 1)
+            }
+            session.logIdx = (session.logIdx or 0) + 1
+            if session.logIdx <= UGT.MAX_LOG_ENTRIES then
+                session.log[session.logIdx] = entry
+            else
+                -- Wrap around: overwrite oldest entry
+                local wrap = ((session.logIdx - 1) % UGT.MAX_LOG_ENTRIES) + 1
+                session.log[wrap] = entry
             end
         end
     end
+end
+
+-- Linearize the ring buffer log into chronological order.
+-- Call before reading log entries (slash commands, session end).
+function UGT.LinearizeLog(session)
+    if not session or not session.logIdx then return end
+    if session.logIdx <= UGT.MAX_LOG_ENTRIES then return end -- not wrapped, already linear
+    local size = math.min(session.logIdx, UGT.MAX_LOG_ENTRIES)
+    local startSlot = ((session.logIdx) % UGT.MAX_LOG_ENTRIES) + 1 -- oldest entry
+    local linear = {}
+    for i = 0, size - 1 do
+        local slot = ((startSlot - 1 + i) % UGT.MAX_LOG_ENTRIES) + 1
+        linear[i + 1] = session.log[slot]
+    end
+    session.log = linear
+    session.logIdx = size -- reset so it's linear again
 end
 
 -- Chat: always prints to chat (for load messages, command responses)
@@ -157,6 +165,8 @@ function UGT.PruneCurrentSession()
     if not UGT.savedVars or not UGT.savedVars.sessions then return end
     local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
     if not session then return end
+    -- Linearize the ring buffer, then truncate if limit was lowered
+    UGT.LinearizeLog(session)
     while #session.log > UGT.MAX_LOG_ENTRIES do
         table.remove(session.log, 1)
     end
@@ -183,8 +193,9 @@ function UGT.GetGroupSnapshot()
             ultCurrent  = current,
             ultMax      = max,
             inCombat    = IsUnitInCombat("player"),
-            magmaArmor  = UGT.magmaArmorActive["player"] and true or false,
-            magmaId     = UGT.magmaArmorActive["player"] and UGT.magmaArmorActive["player"].abilityId or 0,
+            ultBlocked  = UGT.ultBlockActive["player"] and true or false,
+            ultBlockId  = UGT.ultBlockActive["player"] and UGT.ultBlockActive["player"].abilityId or 0,
+            ultBlockName = UGT.ultBlockActive["player"] and UGT.ultBlockActive["player"].name or nil,
             posX        = px,
             posY        = py,
             isPlayer    = true,
@@ -217,9 +228,10 @@ function UGT.GetGroupSnapshot()
             local dy = py - myY
             local dist = math.sqrt(dx * dx + dy * dy)
 
-            -- Check for Magma Armor via our tracked state
-            local hasMagma = UGT.magmaArmorActive[tag] and true or false
-            local magmaId = hasMagma and UGT.magmaArmorActive[tag].abilityId or 0
+            -- Check for ult-blocking ability via our tracked state
+            local hasUltBlock = UGT.ultBlockActive[tag] and true or false
+            local ultBlockId = hasUltBlock and UGT.ultBlockActive[tag].abilityId or 0
+            local ultBlockName = hasUltBlock and UGT.ultBlockActive[tag].name or nil
 
             table.insert(snapshot, {
                 tag         = tag,
@@ -227,8 +239,9 @@ function UGT.GetGroupSnapshot()
                 ultCurrent  = current,
                 ultMax      = max,
                 inCombat    = IsUnitInCombat(tag),
-                magmaArmor  = hasMagma,
-                magmaId     = magmaId,
+                ultBlocked  = hasUltBlock,
+                ultBlockId  = ultBlockId,
+                ultBlockName = ultBlockName,
                 posX        = px,
                 posY        = py,
                 distNorm    = dist,
@@ -246,14 +259,14 @@ function UGT.PrintGroupSnapshot(snapshot, label, outputFn)
     local out = outputFn or UGT.Log
     out(label .. " (" .. #snapshot .. " members):")
     for _, m in ipairs(snapshot) do
-        local magmaTag = m.magmaArmor and " |cFF0000[MAGMA ARMOR]|r" or ""
+        local ultBlockTag = m.ultBlocked and (" |cFF0000[ULT BLOCKED: " .. (m.ultBlockName or "?") .. "]|r") or ""
         local deadTag = m.isDead and " |c888888[DEAD]|r" or ""
         local meTag = m.isPlayer and " |c00FF00<< YOU >>|r" or ""
         local distStr = m.distNorm and string.format("  dist=%.4f", m.distNorm) or ""
         out(string.format("  %s %s: ult=%d/%d  combat=%s  pos=(%.4f,%.4f)%s%s%s%s",
             m.tag, m.name, m.ultCurrent, m.ultMax,
             tostring(m.inCombat), m.posX, m.posY,
-            distStr, magmaTag, deadTag, meTag))
+            distStr, ultBlockTag, deadTag, meTag))
     end
 end
 
@@ -261,31 +274,8 @@ end
 -- Buff scanning helpers
 -- ---------------------------------------------------------------------------
 
-function UGT.IsMagmaArmorAbility(abilityId)
-    return UGT.MAGMA_ARMOR_IDS[abilityId] ~= nil
-end
-
-function UGT.ScanForMagmaArmor(unitTag)
-    local numBuffs = GetNumBuffs(unitTag)
-    for i = 1, numBuffs do
-        local buffName, timeStarted, timeEnding, buffSlot, stackCount,
-              iconFilename, deprecatedBuffType, effectType, abilityType,
-              statusEffectType, abilityId, canClickOff, castByPlayer =
-              GetUnitBuffInfo(unitTag, i)
-
-        if UGT.IsMagmaArmorAbility(abilityId) then
-            return true, abilityId, buffName, timeEnding
-        end
-
-        -- Fallback: keyword match for names we might not have IDs for
-        if buffName then
-            local lower = zo_strlower(buffName)
-            if lower:find("magma armor") or lower:find("magma shell") or lower:find("corrosive armor") then
-                return true, abilityId, buffName, timeEnding
-            end
-        end
-    end
-    return false, nil, nil, nil
+function UGT.IsUltBlockingAbility(abilityId)
+    return UGT.MAGMA_ARMOR_IDS[abilityId] ~= nil or UGT.BONE_GOLIATH_IDS[abilityId] ~= nil
 end
 
 function UGT.DumpAllBuffs(unitTag)
@@ -301,12 +291,12 @@ function UGT.DumpAllBuffs(unitTag)
 
         local remaining = timeEnding > 0 and (timeEnding - now) or -1
         local timeStr = remaining >= 0 and string.format("%.1fs", remaining) or "permanent"
-        local magmaTag = UGT.IsMagmaArmorAbility(abilityId) and " |cFF0000*** MAGMA ***|r" or ""
+        local ultBlockTag = UGT.IsUltBlockingAbility(abilityId) and " |cFF0000*** ULT BLOCK ***|r" or ""
 
         UGT.Chat(string.format("  [%d] %s  stacks=%d  type=%s  atype=%s  %s%s",
             abilityId, buffName or "?", stackCount,
             tostring(effectType), tostring(abilityType),
-            timeStr, magmaTag))
+            timeStr, ultBlockTag))
     end
 end
 
@@ -354,16 +344,16 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
     -- Color code based on whether this is a tracked set proc
     local color = isTrackedSet and "|c00FF00" or "|cAAAAAAA"
     local setTag = isTrackedSet and (" |cFFFF00[" .. setName .. "]|r") or ""
-    local magmaTag = ""
+    local ultBlockTag = ""
 
-    -- Check if the target is a group member under Magma Armor
+    -- Check if the target is a group member under an ult-blocking ability
     local groupSize = GetGroupSize()
     if groupSize > 0 then
         for i = 1, groupSize do
             local tag = GetGroupUnitTagByIndex(i)
-            if tag and GetUnitName(tag) == targetName then
-                if UGT.magmaArmorActive[tag] then
-                    magmaTag = " |cFF0000[TARGET HAS MAGMA ARMOR]|r"
+            if tag and zo_strformat("<<1>>", GetUnitName(tag)) == targetName then
+                if UGT.ultBlockActive[tag] then
+                    ultBlockTag = " |cFF0000[TARGET ULT BLOCKED: " .. UGT.ultBlockActive[tag].name .. "]|r"
                 end
                 break
             end
@@ -373,7 +363,7 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
     UGT.Log(string.format("%sULT ENERGIZE|r: [%d] %s  %s → %s  +%d ult%s%s",
         color, abilityId, abilityName or "?",
         sourceName, targetName,
-        hitValue, setTag, magmaTag))
+        hitValue, setTag, ultBlockTag))
 
     -- Trigger group snapshot (debounced so a multi-target proc only takes one)
     if now - UGT.lastSnapshotTime >= UGT.SNAPSHOT_DEBOUNCE then
@@ -392,6 +382,11 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
                 if #session.procs > UGT.MAX_PROCS then
                     table.remove(session.procs, 1)
                 end
+
+                -- Schedule a human-readable summary after the debounce window
+                UGT.pendingSummaryProcIdx = #session.procs
+                zo_callLater(function() UGT.EmitProcSummary() end,
+                    math.floor(UGT.SNAPSHOT_DEBOUNCE * 1000) + 50)
             end
         end
 
@@ -410,6 +405,60 @@ function UGT.OnUltEnergize(_, result, isError, abilityName, abilityGraphic,
             end
         end
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Human-readable proc summary (fires after debounce window closes)
+-- ---------------------------------------------------------------------------
+
+function UGT.EmitProcSummary()
+    local idx = UGT.pendingSummaryProcIdx
+    UGT.pendingSummaryProcIdx = nil
+    if not idx then return end
+    if not UGT.savedVars or not UGT.savedVars.sessions then return end
+    local session = UGT.savedVars.sessions[#UGT.savedVars.sessions]
+    if not session or not session.procs[idx] then return end
+
+    local proc = session.procs[idx]
+    local trigger = proc.trigger
+    if not trigger or trigger.manual then return end
+
+    local setName = trigger.setName
+    if not setName then return end -- only summarize tracked set procs
+
+    -- Build target list: first target from trigger, rest from additionalTargets
+    local targets = {}
+    table.insert(targets, { name = trigger.target, ult = trigger.hitValue or 0 })
+    if proc.additionalTargets then
+        for _, t in ipairs(proc.additionalTargets) do
+            table.insert(targets, { name = t.target, ult = t.hitValue or 0 })
+        end
+    end
+
+    local source = trigger.source or "?"
+    local totalUlt = 0
+    local nameList = {}
+    for _, t in ipairs(targets) do
+        totalUlt = totalUlt + t.ult
+        table.insert(nameList, string.format("%s (+%d)", t.name, t.ult))
+    end
+
+    local summary
+    if setName == "Crypt Transfer" then
+        summary = string.format("|cFFFF00%s|r activated |c00FFFF%s|r, distributing |cFFFFFF%d|r ult to %d targets: %s",
+            source, setName, totalUlt, #targets, table.concat(nameList, ", "))
+    else
+        summary = string.format("|cFFFF00%s|r activated |c00FFFF%s|r, granting ult to %d targets: %s",
+            source, setName, #targets, table.concat(nameList, ", "))
+    end
+
+    -- Always print to chat (these are rare, high-value events)
+    UGT.Chat(summary)
+    -- Also write to savedvars log
+    UGT.Log(summary)
+
+    -- Store the summary text in the proc entry for offline analysis
+    proc.summary = summary
 end
 
 -- ---------------------------------------------------------------------------
@@ -450,7 +499,7 @@ function UGT.OnDiscoveryCombatEvent(_, result, isError, abilityName, abilityGrap
 end
 
 -- ---------------------------------------------------------------------------
--- Event: Effect Changed — track Magma Armor gain/fade on group members
+-- Event: Effect Changed — track ult-blocking ability gain/fade on group members
 -- ---------------------------------------------------------------------------
 
 function UGT.OnEffectChanged(_, changeType, effectSlot, effectName, unitTag,
@@ -458,54 +507,45 @@ function UGT.OnEffectChanged(_, changeType, effectSlot, effectName, unitTag,
         effectType, abilityType, statusEffectType, unitName, unitId,
         abilityId, sourceType)
 
-    local isMagma = UGT.IsMagmaArmorAbility(abilityId)
+    local isUltBlock = UGT.IsUltBlockingAbility(abilityId)
 
-    -- Fallback keyword match
-    if not isMagma and effectName then
+    -- Fallback keyword match (only in discovery mode — all known IDs are hardcoded)
+    if not isUltBlock and UGT.discoveryMode and effectName then
         local lower = zo_strlower(effectName)
-        if lower:find("magma armor") or lower:find("magma shell") or lower:find("corrosive armor") then
-            isMagma = true
+        if lower:find("magma armor") or lower:find("magma shell") or lower:find("corrosive armor")
+            or lower:find("bone goliath") or lower:find("pummeling goliath") or lower:find("ravenous goliath") then
+            isUltBlock = true
             -- Learn this ability ID for future reference
             if abilityId and abilityId > 0 then
-                UGT.MAGMA_ARMOR_IDS[abilityId] = effectName
-                UGT.Log(string.format("|cFFFF00DISCOVERED|r Magma Armor buff ID: [%d] %s", abilityId, effectName))
+                if lower:find("magma") or lower:find("corrosive") then
+                    UGT.MAGMA_ARMOR_IDS[abilityId] = effectName
+                else
+                    UGT.BONE_GOLIATH_IDS[abilityId] = effectName
+                end
+                UGT.Log(string.format("|cFFFF00DISCOVERED|r ult-blocking ability ID: [%d] %s", abilityId, effectName))
             end
         end
     end
 
-    if not isMagma then return end
+    if not isUltBlock then return end
 
     local changeName = UGT.GetChangeName(changeType)
 
     if changeType == EFFECT_RESULT_GAINED or changeType == EFFECT_RESULT_FULL_REFRESH then
-        UGT.magmaArmorActive[unitTag] = {
+        UGT.ultBlockActive[unitTag] = {
             abilityId = abilityId,
             name      = effectName,
             endTime   = endTime,
         }
-        UGT.Log(string.format("|cFF0000MAGMA ARMOR %s|r: [%d] %s on %s (%s)  ends=%.1f",
+        UGT.Log(string.format("|cFF0000ULT BLOCK %s|r: [%d] %s on %s (%s)  ends=%.1f",
             changeName, abilityId, effectName or "?",
             unitTag, unitName or "?", endTime))
 
     elseif changeType == EFFECT_RESULT_FADED then
-        UGT.magmaArmorActive[unitTag] = nil
-        UGT.Log(string.format("|c00FF00MAGMA ARMOR FADED|r: [%d] %s on %s (%s)",
+        UGT.ultBlockActive[unitTag] = nil
+        UGT.Log(string.format("|c00FF00ULT BLOCK FADED|r: [%d] %s on %s (%s)",
             abilityId, effectName or "?", unitTag, unitName or "?"))
     end
-end
-
--- ---------------------------------------------------------------------------
--- Event: Power Update — track ultimate value changes on player
--- (Group members' ult is only visible on self unless using lib broadcast)
--- ---------------------------------------------------------------------------
-
-function UGT.OnPowerUpdate(_, unitTag, powerIndex, powerType, powerValue, powerMax, powerEffectiveMax)
-    if powerType ~= COMBAT_MECHANIC_FLAGS_ULTIMATE then return end
-    if unitTag ~= "player" then return end
-
-    -- We don't log every tick to avoid spam; this is used for
-    -- confirming whether the player actually received the ult after a proc.
-    -- The data is captured in snapshots instead.
 end
 
 -- ---------------------------------------------------------------------------
@@ -526,16 +566,16 @@ function UGT.SlashCommand(args)
         UGT.Chat(string.format("  Ultimate: %d / %d", current, max))
         UGT.Chat("  In combat: " .. tostring(IsUnitInCombat("player")))
 
-        -- Magma Armor state
-        local magmaCount = 0
-        for tag, info in pairs(UGT.magmaArmorActive) do
-            magmaCount = magmaCount + 1
+        -- Ult-blocking ability state
+        local ultBlockCount = 0
+        for tag, info in pairs(UGT.ultBlockActive) do
+            ultBlockCount = ultBlockCount + 1
             local name = GetUnitName(tag) or "?"
-            UGT.Chat(string.format("  |cFF0000Magma Armor active|r: %s (%s) — [%d] %s",
+            UGT.Chat(string.format("  |cFF0000Ult blocked|r: %s (%s) — [%d] %s",
                 tag, name, info.abilityId, info.name))
         end
-        if magmaCount == 0 then
-            UGT.Chat("  Magma Armor: |c00FF00none active|r")
+        if ultBlockCount == 0 then
+            UGT.Chat("  Ult-blocking abilities: |c00FF00none active|r")
         end
 
         -- Group snapshot
@@ -573,11 +613,7 @@ function UGT.SlashCommand(args)
         end
 
     elseif cmd == "scan" then
-        -- Dump all buffs on player to discover Magma Armor buff IDs
-        UGT.DumpAllBuffs("player")
-
-    elseif cmd == "scangroup" then
-        -- Dump buffs on all group members
+        -- Dump buffs on self (solo) or all group members
         local groupSize = GetGroupSize()
         if groupSize <= 0 then
             UGT.DumpAllBuffs("player")
@@ -682,16 +718,15 @@ function UGT.SlashCommand(args)
             UGT.StartSession()
         end
         UGT.recentEnergizes = {}
-        UGT.magmaArmorActive = {}
+        UGT.ultBlockActive = {}
         UGT.Chat("Log cleared, session reset.")
 
     elseif cmd == "help" then
-        UGT.Chat("Commands: /ugt status | verbose | snapshot | scan | scangroup | discover | procs | recent | limit | clear | help")
-        UGT.Chat("  status    — Current ult, group state, Magma Armor tracking")
+        UGT.Chat("Commands: /ugt status | verbose | snapshot | scan | discover | procs | recent | limit | clear | help")
+        UGT.Chat("  status    — Current ult, group state, ult-block tracking")
         UGT.Chat("  verbose   — Toggle verbose mode (show events in chat)")
         UGT.Chat("  snapshot  — Manual group state snapshot to log")
-        UGT.Chat("  scan      — Dump all buffs on self (ID discovery)")
-        UGT.Chat("  scangroup — Dump all buffs on all group members")
+        UGT.Chat("  scan      — Dump all buffs on self or group (ID discovery)")
         UGT.Chat("  discover  — Toggle discovery mode (logs ALL energize events)")
         UGT.Chat("  procs     — Show recent set proc events with snapshots")
         UGT.Chat("  recent    — Show recent ult energize events")
@@ -714,9 +749,11 @@ function UGT.StartSession()
             date    = GetDateStringFromTimestamp(GetTimeStamp()),
             procs   = {},
             log     = {},
+            logIdx  = 0,
         })
         UGT.PruneSessions()
     end
+    UGT.ultBlockActive = {}
 end
 
 -- ---------------------------------------------------------------------------
@@ -768,9 +805,11 @@ function UGT.OnAddonLoaded(_, addonName)
     EVENT_MANAGER:RegisterForEvent(UGT.name, EVENT_COMBAT_EVENT, UGT.OnUltEnergize)
     EVENT_MANAGER:AddFilterForEvent(UGT.name, EVENT_COMBAT_EVENT,
         REGISTER_FILTER_COMBAT_RESULT, ACTION_RESULT_POWER_ENERGIZE)
+    EVENT_MANAGER:AddFilterForEvent(UGT.name, EVENT_COMBAT_EVENT,
+        REGISTER_FILTER_POWER_TYPE, COMBAT_MECHANIC_FLAGS_ULTIMATE)
 
     -- -------------------------------------------------------------------
-    -- Effect changed on group members: track Magma Armor gain/fade
+    -- Effect changed on group members: track ult-blocking ability gain/fade
     -- We register for ALL group units (group1..group24) plus player
     -- Multiple registrations with different unit tag filters
     -- -------------------------------------------------------------------
@@ -807,7 +846,7 @@ function UGT.OnAddonLoaded(_, addonName)
     else
         UGT.Log("  No set proc IDs configured yet.")
     end
-    UGT.Log("  Tracking Magma Armor IDs: 15957, 17874, 17878")
+    UGT.Log("  Tracking ult-blocking IDs: 15957, 17874, 17878 (Magma Armor), 115001, 118664, 118279 (Bone Goliath)")
     if UGT.lgcs then
         UGT.Log("  LibGroupCombatStats connected.")
     else

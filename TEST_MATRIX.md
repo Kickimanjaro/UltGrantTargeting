@@ -2,19 +2,20 @@
 
 ## Objective
 
-Determine how the game selects targets for ultimate-granting set procs, and whether players that cannot gain ultimate (e.g., during Magma Armor) are skipped or receive (and waste) the grant.
+Determine how the game selects targets for ultimate-granting set procs, and whether players that cannot gain ultimate (e.g., during Magma Armor) are skipped or receive (and waste) the ultimate grant.
 
 ## Sets Under Test
 
-| Set | Set Description | Targets | Stated Range | ICD |
+| Set | Set Description | Targets | Range | ICD |
 |-----|----------------|---------|-------------|-----|
 | **Arkasis' Genius** | Drink potion in combat → you + 3 group members gain 44 ult | 3 (+ self) | Unknown | 30s |
 | **Colovian Highlands General** | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
 | **Cryptcannon Vestments** | Replaces ult with Crypt Transfer: consume all ult, distribute to nearby group members | Group (nearby) | Unknown | 5s |
 
 ## Ult Blocking Ability
-
-- **Magma Armor** (and morphs Magma Shell, Corrosive Armor) — prevents the activator from gaining ultimate for 10s
+The following two abilities are known to prevent the activator from gaining ult for their duration.
+- **Magma Armor** (and morphs Magma Shell, Corrosive Armor) for 10s
+- **Bone Goliath Transformation** (and morphs Pummeling Goliath, Ravenous Goliath)  for 20s
 
 ## Prerequisites
 
