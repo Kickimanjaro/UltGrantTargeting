@@ -8,7 +8,7 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 | Set | Set Description | Targets | Stated Range | ICD |
 |-----|----------------|---------|-------------|-----|
-| **Arkasis' Genius** | Drink potion in combat → you + 3 group members gain 42 ult | 3 (+ self) | Unknown | 30s |
+| **Arkasis' Genius** | Drink potion in combat → you + 3 group members gain 44 ult | 3 (+ self) | Unknown | 30s |
 | **Colovian Highlands General** | Kill a player → Blood Debt stacks for 0.5s → on expire, you + up to 5 group members gain 15 ult/stack | Up to 5 (+ self) | 28m | N/A |
 | **Cryptcannon Vestments** | Replaces ult with Crypt Transfer: consume all ult, distribute to nearby group members | Group (nearby) | Unknown | 5s |
 
@@ -34,12 +34,12 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 | # | Test | Players | Setup | Steps | Expected | Actual |
 |---|------|---------|-------|-------|----------|--------|
-| A1 | Baseline (equal ult, close) | 5 | All 5 within 5m, all at ~100 ult | Drink potion. Note which 3 of B/C/D/E receive +42. Repeat 5×. | Determines if selection is random, group-index-based, or consistent | |
+| A1 | Baseline (equal ult, close) | 5 | All 5 within 5m, all at ~100 ult | Drink potion. Note which 3 of B/C/D/E receive +44. Repeat 5×. | Determines if selection is random, group-index-based, or consistent | |
 | A2 | Ult variance | 5 | B: 0 ult, C: 100, D: 300, E: 500. All within 5m. | Drink potion. Repeat 5×. Who is left out each time? | If least-ult: E (highest) consistently left out | |
 | A3 | Reversed ult variance | 5 | B: 500, C: 300, D: 100, E: 0. All within 5m. | Drink potion. Repeat 5×. | If least-ult: B consistently left out (confirms it's ult-based, not index-based) | |
 | A4 | Distance variance | 5 | B: 5m, C: 10m, D: 20m, E: 40m. All similar ult. | Drink potion. Repeat 5×. Who is left out? | If proximity-based: E (farthest) left out | |
 | A5 | Ult vs distance conflict | 5 | B: 500 ult at 5m. E: 0 ult at 40m. C, D mid-range/mid-ult. | Drink potion. Is B (close, high ult) or E (far, low ult) left out? | Determines which factor dominates | |
-| A6 | Self always receives | 5 | Arkasis wearer (A) at 500 ult. B/C/D/E at 0. All close. | Drink potion. Does A receive +42 despite being highest? | Self always receives regardless | |
+| A6 | Self always receives | 5 | Arkasis wearer (A) at 500 ult. B/C/D/E at 0. All close. | Drink potion. Does A receive +44 despite being highest? | Self always receives regardless | |
 
 ### Range
 
@@ -65,13 +65,13 @@ Determine how the game selects targets for ultimate-granting set procs, and whet
 
 | # | Test | Players | Setup | Steps | Expected | Actual |
 |---|------|---------|-------|-------|----------|--------|
-| C1 | Magma Armor — targeted or skipped? | 4 | All within 5m. One player activates Magma Armor, Arkasis wearer drinks potion within 2s. | Count energize events. 3 events = targeted (ult may be wasted). 2 events = skipped. Check blocked player's actual ult change. | ??? (core question) | |
+| C1 | Magma Armor — targeted or skipped? | 4 | All within 5m. One player activates Magma Armor, Arkasis wearer drinks potion within 2s. **Ensure no one is at max ult** (see Notes). | Count energize events. 3 events = targeted (ult may be wasted). 2 events = skipped. Check blocked player's actual ult change. | ??? (core question) | |
 | C2 | Skip replacement | 5 | All within 5m. One player under Magma Armor. 4 non-caster candidates, set picks 3. | Drink potion. If blocked player is skipped, do all 3 remaining eligible members receive? Or only 2 (slot wasted)? | If skip + replace: 3 events, none to blocked. If skip + waste slot: 2 events. | |
 | C3 | Two members under Magma Armor | 5 | Two players activate Magma Armor. 4 candidates, 2 blocked. | Drink potion. How many energize events fire? | If skip + replace: 3 events (all to eligible). If skip + waste: 1 event. If targeted + wasted: 3 events. | |
 | C4 | Timing — early in Magma Armor | 4 | Player casts Magma Armor, potion at ~1s into the 10s duration. | Same observation as C1 — count events, check ult. | Consistent with C1 | |
 | C5 | Timing — late in Magma Armor | 4 | Player casts Magma Armor, potion at ~9s (just before fade). | Same observation as C1. | Consistent with C1 | |
 | C6 | Just after Magma Armor fades | 4 | Player's Magma Armor fades. Drink potion within 1s of fade. | Player should receive ult normally. 3 energize events. | 3 events, ult increases | |
-| C7 | Caster under own Magma Armor | 4 | Arkasis wearer activates own Magma Armor, drinks potion. | Does caster receive +42? Do the 3 group members still receive? | Caster may not gain ult, but group members should | |
+| C7 | Caster under own Magma Armor | 4 | Arkasis wearer activates own Magma Armor, drinks potion. | Does caster receive +44? Do the 3 group members still receive? | Caster may not gain ult, but group members should | |
 
 ---
 
@@ -158,5 +158,7 @@ After each test:
 
 ## Notes
 
+- **Tooltip says 42, actual grant is 44.** Every observed Arkasis proc in savedvars shows `hitValue = 44`. The test matrix uses the real value (44).
+- **Max-ult suppression**: When a player is already at max ultimate, the game does not fire an energize event at all — it doesn't send a "wasted" event with 0 gain. This means event counting is unreliable if any candidate is at ult cap: they'll look like they were skipped even if they were targeted. **Ensure test participants are not at max ult** when running any event-counting test (Magma Armor, dead player, etc.).
 - `GetMapPlayerPosition` returns normalized (0–1) coordinates. Distance values are relative within a zone; absolute meter calibration requires a known reference (e.g., Rapid Maneuver 28m radius).
 - The addon integrates with LibGroupCombatStats (via LibGroupBroadcast) to read group members' actual ult values in snapshots. All participants should have LGB+LGCS installed for this to work.
