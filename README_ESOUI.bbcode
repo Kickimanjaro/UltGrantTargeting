@@ -7,31 +7,35 @@ UltGrantTargeting is a testing tool designed to gather data about how ultimate-g
 [LIST]
 [*]How do [B]Arkasis' Genius[/B], [B]Colovian Highlands General[/B], and [B]Cryptcannon Vestments[/B] choose which group members receive ultimate?
 [*]Is target selection based on proximity, lowest ultimate, group index, or random?
-[*]When a group member [I]cannot[/I] gain ultimate (e.g., during [B]Magma Armor[/B]), does the set skip them and pick someone else, or does it waste a target slot on them?
+[*]When a group member [I]cannot[/I] gain ultimate (e.g., during [B]Magma Armor[/B] or [B]Bone Goliath Transformation[/B]), does the set skip them and pick someone else, or does it waste a target slot on them?
 [/LIST]
 
-The addon logs every ultimate energize event (ACTION_RESULT_POWER_ENERGIZE with COMBAT_MECHANIC_FLAGS_ULTIMATE) along with a full group state snapshot — each member's ultimate level, position, distance from the caster, combat state, alive/dead status, and whether they're under a Magma Armor effect. All data is saved to SavedVariables for offline analysis.
+The addon logs every ultimate energize event (ACTION_RESULT_POWER_ENERGIZE with COMBAT_MECHANIC_FLAGS_ULTIMATE) along with a full group state snapshot — each member's ultimate level, position, distance from the caster, combat state, alive/dead/online status, and whether they're under an ability that blocks ultimate gain. All data is saved to SavedVariables for offline analysis.
 
 [COLOR="DarkOrange"][SIZE="4"]Setup[/SIZE][/COLOR]
 
-[B]Required dependency:[/B] [URL="https://www.esoui.com/downloads/info3710-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
+[B]Required dependency:[/B] [URL="https://www.esoui.com/downloads/info4024-LibGroupCombatStats.html"]LibGroupCombatStats[/URL]
 
 LibGroupCombatStats has its own requirements that you'll also need to install:
 [LIST]
-[*][URL="https://www.esoui.com/downloads/info2075-LibCombat.html"]LibCombat[/URL]
+[*][URL="https://www.esoui.com/downloads/info2528-LibCombat.html"]LibCombat[/URL]
 [*][URL="https://www.esoui.com/downloads/info1337-LibGroupBroadcast.html"]LibGroupBroadcast[/URL]
-[*][URL="https://www.esoui.com/downloads/info2382-LibDebugLogger.html"]LibDebugLogger[/URL]
-[*][URL="https://www.esoui.com/downloads/info7-LibAddonMenu.html"]LibAddonMenu-2.0[/URL]
 [/LIST]
 
-For best results, [B]all group participants[/B] should install the full set so that everyone's ultimate values are broadcast to each other.
+Optional (but recommended):
+[LIST]
+[*][URL="https://www.esoui.com/downloads/info2275-LibDebugLogger.html"]LibDebugLogger[/URL]
+[/LIST]
 
 [COLOR="DarkOrange"][SIZE="4"]Slash Commands[/SIZE][/COLOR]
 
 [LIST]
-[*][B]/ugt status[/B] — Show current tracking state and configured set IDs
+[*][B]/ugt status[/B] — Show current ult, group state, active ult-blocking abilities, LGCS connection, verbose/discovery mode, and session stats
 [*][B]/ugt verbose[/B] — Toggle verbose mode (show events in chat; off by default)
 [*][B]/ugt snapshot[/B] — Print a group state snapshot to chat (positions, ult, combat status)
+[*][B]/ugt scan[/B] — Dump all buffs on self or group members, highlighting ult-blocking abilities
+[*][B]/ugt discover[/B] — Toggle discovery mode (log all power energize events to find unknown ability IDs)
+[*][B]/ugt note <text>[/B] — Insert an annotated snapshot into the log as a test boundary marker
 [*][B]/ugt procs[/B] — Show recent tracked set proc events
 [*][B]/ugt recent[/B] — Show all recent ultimate energize events
 [*][B]/ugt limit[/B] — View or set savedvar size limits (sessions, procs, log entries)
@@ -46,7 +50,8 @@ All events are saved to the [B]UltGrantTargetingLog[/B] saved variable. Each tra
 [LIST]
 [*]The triggering ability (source, target, ability ID, ult amount)
 [*]Additional targets that received ult from the same proc (within a 150ms debounce window)
-[*]A full group snapshot at the time of the proc
+[*]A full group snapshot at the time of the proc (ult values, positions, combat/dead/online status, ult-blocking state)
+[*]A human-readable summary cross-referencing targets against the snapshot (identifies blocked, dead, or skipped members)
 [/LIST]
 
 Log out to flush SavedVariables, then review [B]UltGrantTargetingLog.lua[/B] in your SavedVariables folder.
