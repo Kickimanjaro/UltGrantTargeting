@@ -45,7 +45,7 @@ Optional (but recommended):
 
 [COLOR="DarkOrange"][SIZE="4"]Data[/SIZE][/COLOR]
 
-All events are saved to the [B]UltGrantTargetingLog[/B] saved variable. Each tracked set proc includes:
+All events are saved to the [B]UltGrantTargeting[/B] saved variable file. Each tracked set proc includes:
 
 [LIST]
 [*]The triggering ability (source, target, ability ID, ult amount)
@@ -53,6 +53,16 @@ All events are saved to the [B]UltGrantTargetingLog[/B] saved variable. Each tra
 [*]A full group snapshot at the time of the proc (ult values, positions, combat/dead/online status, ult-blocking state)
 [*]A human-readable summary cross-referencing targets against the snapshot (identifies blocked, dead, or skipped members)
 [/LIST]
+
+To keep the saved variable file from growing unbounded, all storage is capped with configurable limits:
+
+[LIST]
+[*][B]Sessions:[/B] max 10 retained (oldest pruned on login)
+[*][B]Procs:[/B] max 500 per session (oldest removed when exceeded)
+[*][B]Log entries:[/B] max 2000 per session (ring buffer — overwrites oldest entries in place, no table resizing)
+[/LIST]
+
+All three limits can be viewed and adjusted in-game with [B]/ugt limit[/B]. The current session can also be wiped at any time with [B]/ugt clear[/B].
 
 Log out to flush SavedVariables, then review [B]UltGrantTargetingLog.lua[/B] in your SavedVariables folder.
 
