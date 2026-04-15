@@ -3,7 +3,7 @@ UltGrantTargeting = {}
 local UGT = UltGrantTargeting
 
 UGT.name = "UltGrantTargeting"
-UGT.version = "1.3.0"
+UGT.version = "1.4.0"
 UGT.prefix = "|c33CCFF[UGT]|r "
 
 UGT.savedVars = nil
@@ -843,11 +843,7 @@ function UGT.OnAddonLoaded(_, addonName)
     if addonName ~= UGT.name then return end
     EVENT_MANAGER:UnregisterForEvent(UGT.name, EVENT_ADD_ON_LOADED)
 
-    UGT.savedVars = UltGrantTargetingLog or { sessions = {} }
-    UltGrantTargetingLog = UGT.savedVars
-    if not UGT.savedVars.sessions then
-        UGT.savedVars.sessions = {}
-    end
+    UGT.savedVars = ZO_SavedVars:NewAccountWide("UltGrantTargetingLog", 1, nil, { sessions = {} }, GetWorldName())
     UGT.StartSession()
     UGT.RebuildTrackedSetIDs()
 
